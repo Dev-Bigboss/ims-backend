@@ -109,6 +109,11 @@ class Supplier(BaseModel):
         json_encoders = {ObjectId: str}
         from_attributes = True
 
+class CartItem(BaseModel):
+    productId: str
+    quantity: int = Field(..., ge=1)
+    price: float = Field(..., gt=0)
+
 class User(BaseModel):
     id: Optional[PyObjectId] = Field(default_factory=lambda: str(ObjectId()), alias="_id")
     name: str
@@ -116,6 +121,8 @@ class User(BaseModel):
     password: str
     role: Literal["customer", "admin"] = "customer"
     lowStockThreshold: int = Field(default=10, ge=0)
+    favorites: List[str] = Field(default_factory=list)  # List of product IDs
+    cartItems: List[CartItem] = Field(default_factory=list)  # List of cart items
     createdAt: datetime = Field(default_factory=datetime.utcnow)
     class Config:
         arbitrary_types_allowed = True

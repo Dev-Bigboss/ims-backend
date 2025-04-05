@@ -1,15 +1,16 @@
 from datetime import datetime
 from bson import ObjectId
-from fastapi import FastAPI, Request, Depends, HTTPException
+from fastapi import FastAPI, Request, Depends, HTTPException, UploadFile, File
 from pymongo import MongoClient
 from typing import List, Literal, Optional
 from dotenv import load_dotenv
 import os
 import bcrypt
 import jwt
-from models import Activity, Feedback, Order, Payment, Product, Supplier, User, LoginRequest, RegisterRequest, OrderItem
+from models import Activity, CartItem, Feedback, Order, Payment, Product, Supplier, User, LoginRequest, RegisterRequest, OrderItem
 from auth import with_auth
 import aiofiles
+from pydantic import EmailStr
 
 load_dotenv()
 MONGODB_URI = os.getenv("MONGODB_URI")
@@ -180,6 +181,56 @@ async def get_orders(request: Request, page: int = 1, limit: int = 10, auth=Depe
     orders = [Order(**{**o, "_id": str(o["_id"])}) for o in orders]
     return {"orders": orders, "total": total, "page": page, "pages": (total + limit - 1) // limit}
 
+@app.get("/api/user/favorites", response_model=dict)
+async def get_user_favorites(request: Request, auth=Depends(with_auth)):
+    db = get_db()["users"]
+    user = request.state.user
+    user_data = db.find_one({"_id": ObjectId(user["userId"])}, {"favorites": 1})
+    if not user_data:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"favorites": user_data.get("favorites", [])}
+
+@app.put("/api/user/favorites", response_model=dict)
+async def update_user_favorites(request: Request, favorites: List[str], auth=Depends(with_auth)):
+    db = get_db()["users"]
+    user = request.state.user
+    updated_user = db.find_one_and_update(
+        {"_id": ObjectId(user["userId"])},
+        {"$set": {"favorites": favorites}},
+        return_document=True
+    )
+    if not updated_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"favorites": updated_user["favorites"]}
+
+@app.get("/api/user/cart", response_model=dict)
+async def get_user_cart(request: Request, auth=Depends(with_auth)):
+    db = get_db()["users"]
+    user = request.state.user
+    user_data = db.find_one({"_id": ObjectId(user["userId"])}, {"cartItems": 1})
+    if not user_data:
+        raise HTTPException(status_code=404, detail="User not found")
+    cart_items = [
+        {"productId": item["productId"], "quantity": item["quantity"], "price": item["price"]}
+        for item in user_data.get("cartItems", [])
+    ]
+    return {"cartItems": cart_items}
+
+@app.put("/api/user/cart", response_model=dict)
+async def update_user_cart(request: Request, cartItems: List[CartItem], auth=Depends(with_auth)):
+    db = get_db()["users"]
+    user = request.state.user
+    cart_data = [item.dict() for item in cartItems]
+    updated_user = db.find_one_and_update(
+        {"_id": ObjectId(user["userId"])},
+        {"$set": {"cartItems": cart_data}},
+        return_document=True
+    )
+    if not updated_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"cartItems": updated_user["cartItems"]}
+
+# Update /api/orders to clear cart after successful order
 @app.post("/api/orders", response_model=dict)
 async def create_order(request: Request, items: List[OrderItem], auth=Depends(with_auth)):
     db = get_db()
@@ -188,7 +239,6 @@ async def create_order(request: Request, items: List[OrderItem], auth=Depends(wi
     if not items:
         raise HTTPException(status_code=400, detail="Cart items are required")
 
-    # Validate stock and prepare order items
     order_items = []
     for item in items:
         product = db["products"].find_one({"_id": ObjectId(item.productId)})
@@ -198,27 +248,18 @@ async def create_order(request: Request, items: List[OrderItem], auth=Depends(wi
             raise HTTPException(status_code=400, detail=f"Insufficient stock for {product['name']}")
         order_items.append({"productId": str(product["_id"]), "quantity": item.quantity, "price": product["price"]})
 
-    # Calculate total amount
     total_amount = sum(item["price"] * item["quantity"] for item in order_items)
-
-    # Create order
     order_data = {"customerId": user["userId"], "items": order_items, "totalAmount": total_amount, "status": "processing", "orderDate": datetime.utcnow()}
     result = db["orders"].insert_one(order_data)
     order_id = str(result.inserted_id)
 
-    # Update stock
     for item in order_items:
         db["products"].update_one({"_id": ObjectId(item["productId"])}, {"$inc": {"quantity": -item["quantity"]}})
 
-    # Log activity
-    activity_data = {
-        "action": "Created",
-        "entityType": "order",
-        "entityId": order_id,
-        "details": f"Order #{order_id[-6:]} placed",
-        "userId": user["userId"],
-        "createdAt": datetime.utcnow()
-    }
+    # Clear user's cart after successful order
+    db["users"].update_one({"_id": ObjectId(user["userId"])}, {"$set": {"cartItems": []}})
+
+    activity_data = {"action": "Created", "entityType": "order", "entityId": order_id, "details": f"Order #{order_id[-6:]} placed", "userId": user["userId"], "createdAt": datetime.utcnow()}
     db["activities"].insert_one(activity_data)
 
     return {"order": {**order_data, "_id": order_id}}
