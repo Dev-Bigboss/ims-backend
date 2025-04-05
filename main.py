@@ -11,12 +11,27 @@ from models import Activity, CartItem, Feedback, Order, Payment, Product, Suppli
 from auth import with_auth
 import aiofiles
 from pydantic import EmailStr
+from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 MONGODB_URI = os.getenv("MONGODB_URI")
 JWT_SECRET = os.getenv("JWT_SECRET")
 
 app = FastAPI()
+origins = [
+    "http://localhost:3000",  # Your Next.js frontend
+    "http://localhost:8000",  # Your FastAPI backend (optional, for testing)
+    # Add production URLs later, e.g., "https://yourdomain.com"
+]
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,  # List of allowed origins
+    allow_credentials=True,  # Allow cookies/auth headers
+    allow_methods=["*"],     # Allow all HTTP methods (GET, POST, etc.)
+    allow_headers=["*"],     # Allow all headers
+)
 
 from fastapi.staticfiles import StaticFiles
 app.mount("/uploads", StaticFiles(directory="public/uploads"), name="uploads")
