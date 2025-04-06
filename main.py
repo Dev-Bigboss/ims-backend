@@ -33,8 +33,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve static files
-app.mount("/uploads", StaticFiles(directory="public/uploads"), name="uploads")
+uploads_dir = "public/uploads"
+os.makedirs(uploads_dir, exist_ok=True)  # Creates directory if it doesn’t exist
+
+# Mount the static files directory
+app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 
 # MongoDB Connection
 client = None
