@@ -23,7 +23,7 @@ app = FastAPI()
 # CORS configuration
 origins = [
     "http://localhost:3000",  # Next.js frontend
-    # Add production URLs later, e.g., "https://yourdomain.com"
+   "https://ims-waca.vercel.app"
 ]
 app.add_middleware(
     CORSMiddleware,
